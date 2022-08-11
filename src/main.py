@@ -1,0 +1,458 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""give-ideas-bot"""
+
+import asyncio
+import json
+import os
+import pprint
+import sys
+from typing import Any, Awaitable, Dict, List, Optional
+
+import discord  # type: ignore
+import sqlalchemy  # type: ignore
+import sqlalchemy_utils  # type: ignore
+from sqlalchemy.ext.declarative import declarative_base  # type: ignore
+
+CONFIG: Dict[str, Any] = {
+    "prefix": "'",
+    "note-prefix": '"',
+    "hello-message": "Hello world",
+    "bye-message": "Goodbye world",
+    "cache-sz": 500,
+    "logging": True,
+}
+CONFIG_PATH: str = "config.json"
+GLOBAL_STATE: Dict[str, Any] = {"exit": 0}
+CACHE: Dict[str, Any] = {
+    "s2c": {},
+}
+
+DB_ENGINE: sqlalchemy.engine.base.Engine = sqlalchemy.create_engine("sqlite:///bot.db")
+DB_BASE: sqlalchemy.orm.decl_api.DeclarativeMeta = declarative_base()
+DB_SESSION = sqlalchemy.orm.Session(DB_ENGINE)
+
+
+class Note(DB_BASE):  # type: ignore
+    __tablename__ = "notes"
+
+    name: sqlalchemy.Column = sqlalchemy.Column(sqlalchemy.String, primary_key=True)
+    content: sqlalchemy.Column = sqlalchemy.Column(sqlalchemy.String)
+
+    def __init__(self, name: str, content: str):
+        self.name = name
+        self.content = content
+
+
+def dump_config() -> None:
+    log("Dumping config")
+
+    with open(CONFIG_PATH, "w") as cfg:
+        json.dump(CONFIG, cfg, indent=4)
+
+
+def log(message: str) -> None:
+    if not CONFIG["logging"]:
+        return
+
+    print(f" :: {message}")
+
+
+def command_to_str(command: List[List[str]]) -> str:
+    return "".join(f"{' '.join(line)}\n" for line in command).strip()
+
+
+def str_to_command(command: str) -> List[List[str]]:
+    if len(CACHE["s2c"]) > CONFIG["cache-sz"]:
+        CACHE["s2c"] = {}
+
+    if command in CACHE["s2c"]:
+        return CACHE["s2c"][command]
+
+    result: List[List[str]] = [line.split(" ") for line in command.strip().split("\n")]
+
+    CACHE["s2c"] = result
+    return result
+
+
+def m(content: str, message: discord.Message) -> str:
+    return f"<@{message.author.id}> {content}"
+
+
+def uncode(string: str, codedel: str = "`") -> str:
+    return string.replace(codedel, "\\".join(codedel))
+
+
+def async_exit(msg: Optional[str] = None, code: int = 1) -> None:
+    if msg is not None:
+        log(msg)
+
+    asyncio.get_event_loop().stop()
+    GLOBAL_STATE["exit"] = code
+
+
+def get_nth_word(command: List[List[str]], n: int = 0) -> Optional[str]:
+    found: int = 0
+
+    for widx, word in enumerate(command):
+        if command and all(command):
+            found += 1
+
+        if (found - 1) == n:
+            result: str = word[0]
+            del command[widx][0]
+            return result
+
+    return None
+
+
+class BotCommandsParser:
+    def __init__(self, bot: discord.Client) -> None:
+        self.bot = bot
+
+    async def _send_message(self, message: str) -> None:
+        await self.bot.cchannel.send(message)
+
+    def _note_exists(self, note_name: str) -> bool:
+        return DB_SESSION.query(Note).filter_by(name=note_name).first() is not None
+
+    def _get_help(self, what: str) -> Optional[str]:
+        if (handler := getattr(self, f"cmd_{what}", None)) is None:
+            return None
+
+        if handler.__doc__ is None:
+            return None
+
+        help_text: str = "\n".join(
+            line.strip() for line in uncode(handler.__doc__).split("\n")
+        )
+        return f"```\n{help_text}\n```"
+
+    async def _send_help(self, what: str, message: discord.Message):
+        text: str = f"No such command/help: {what!r}"
+
+        if (_help := self._get_help(what)) is not None:
+            text = _help
+
+        await self._send_message(m(f"\n{text}", message))
+
+    async def cmd_say(
+        self,
+        message: discord.Message,
+        command: List[List[str]],
+    ) -> None:
+        """Repeat a specified string
+        Usage: say <content...>"""
+
+        say_content: str = command_to_str(command)
+
+        if not say_content:
+            await self._send_help("say", message)
+            return
+
+        await self._send_message(say_content)
+
+    async def cmd_set(
+        self,
+        message: discord.Message,
+        command: List[List[str]],
+    ) -> None:
+        """Set a note to a value (save it)
+        Usage: set <name> <content...>"""
+
+        if (note_name := get_nth_word(command)) is None:
+            await self._send_help("set", message)
+            return
+
+        try:
+            DB_SESSION.add(Note(name=note_name, content=command_to_str(command)))
+            DB_SESSION.commit()
+        except sqlalchemy.exc.IntegrityError:
+            DB_SESSION.rollback()
+            await self._send_message(m(f"Note {note_name!r} already exists", message))
+            return
+
+        await self._send_message(m(f"Note {note_name!r} saved", message))
+
+    async def cmd_del(
+        self,
+        message: discord.Message,
+        command: List[List[str]],
+    ) -> None:
+        """Delete a note
+        Usage: del <name>"""
+
+        if (note_name := get_nth_word(command)) is None:
+            await self._send_help("del", message)
+            return
+
+        if not self._note_exists(note_name):
+            await self._send_message(m(f"Note {note_name!r} doesn't exist", message))
+            return
+
+        DB_SESSION.execute(sqlalchemy.delete(Note).where(Note.name == note_name))
+        DB_SESSION.commit()
+
+        await self._send_message(m(f"Note {note_name!r} deleted", message))
+
+    async def cmd_cya(
+        self,
+        message: discord.Message,
+        command: List[List[str]],
+    ) -> None:
+        """Make the bot end itself
+        Usage: cya"""
+
+        await self._send_message(CONFIG["bye-message"])
+        async_exit("Exiting bot because of the cya command", 0)
+
+    async def cmd_list(
+        self,
+        message: discord.Message,
+        command: List[List[str]],
+    ) -> None:
+        """List all notes
+        Usage: list"""
+
+        notes_list: str = (
+            "\n".join(
+                f"- `{uncode(''.join(ent))}`"
+                for ent in DB_SESSION.query(Note.name).all()
+            )
+            or "*No notes found*"
+        )
+
+        await self._send_message(
+            f"""Notes:
+
+{notes_list}
+
+To invoke/expand a note, type '{CONFIG['note-prefix']}<note name>',
+for example: {CONFIG['note-prefix']}Hello"""
+        )
+
+    async def cmd_help(
+        self,
+        message: discord.Message,
+        command: List[List[str]],
+    ) -> None:
+        """Get help about a command
+        Usage: help [command]"""
+
+        if (cmd_name := get_nth_word(command)) is not None:
+            await self._send_help(cmd_name, message)
+            return
+
+        _help: str = "\n"
+        _nl: str = "\n"
+
+        for attr in dir(self):
+            if not attr.startswith("cmd"):
+                continue
+
+            _help += f"`{uncode(attr[4:])}` -- {uncode(getattr(self, attr).__doc__.split(_nl)[0] or 'No help available')}\n"
+
+        await self._send_message(m(_help, message))
+
+    async def cmd_sql(
+        self,
+        message: discord.Message,
+        command: List[List[str]],
+    ) -> None:
+        """Run raw sql queries on the bot's database
+        Usage: sql <sql query>"""
+
+        sql_query: str = command_to_str(command)
+
+        if not sql_query:
+            await self._send_help("sql", message)
+            return
+
+        text: str
+
+        try:
+            text = f"""
+Executed query `{uncode(sql_query)}`
+
+```py
+# Query results
+
+{pprint.pformat(DB_SESSION.execute(f'{sql_query}').all())}
+```
+"""
+            DB_SESSION.commit()
+        except Exception as err:
+            text = f"Executing query failed: {err!r}"
+
+        await self._send_message(m(text, message))
+
+    async def cmd_config(
+        self,
+        message: discord.Message,
+        command: List[List[str]],
+    ) -> None:
+        """Get bot's config
+        Usage: config"""
+
+        await self._send_message(
+            m(f"\n```json\n{uncode(json.dumps(CONFIG, indent=4))}\n```", message)
+        )
+
+
+class Bot(discord.Client):
+    """The bot"""
+
+    def __init__(self) -> None:
+        log("Setting bot up")
+
+        intents: discord.Intents = discord.Intents.default()
+        intents.members = True
+
+        self.cchannel: Optional[discord.TextChannel] = None
+        self.parser = BotCommandsParser(self)
+
+        log("Making the bot")
+        super().__init__(intents=intents)
+
+    def bot(self, token: Optional[str]) -> None:
+        log("Beginning to do checks and run bot")
+
+        if not token:
+            async_exit("Token must not be emoty, null or false")
+
+        self.run(token)
+
+    async def on_ready(self) -> None:
+        for guild in self.guilds:
+            for channel in guild.text_channels[::-1]:
+                if (
+                    channel.permissions_for(guild.me).send_messages
+                    and str(channel.type) == "text"
+                ):
+                    self.cchannel = channel
+
+        if self.cchannel is None:
+            async_exit("No text channels I have access to")
+            return
+
+        log(f"Bot loaded, I am {self.user}")
+        await self.parser._send_message(CONFIG["hello-message"])
+
+    async def on_message(self, message) -> None:
+        if message.author.bot or not any(
+            message.content.startswith(p)
+            for p in (CONFIG["prefix"], CONFIG["note-prefix"])
+        ):
+            return
+
+        self.cchannel = message.channel
+
+        command_str: str = message.content.removeprefix(CONFIG["prefix"])
+        command: List[List[str]] = str_to_command(command_str)
+
+        if command_str.startswith(CONFIG["note-prefix"]):
+            note_name: str = command[0][0].removeprefix(CONFIG["note-prefix"])
+
+            if (
+                note := DB_SESSION.query(Note.content).filter_by(name=note_name).first()
+            ) is not None:
+                await self.parser._send_message(
+                    "\n".join(f"> {line}" for line in "".join(note).split("\n"))
+                )
+                return
+
+            if not note_name.strip():
+                await self.parser.cmd_list(message, command)
+                return
+
+            await self.parser._send_message(m(f"Note {note_name!r} not found", message))
+            return
+
+        try:
+            _bot_roles: discord.Member = self.cchannel.guild.get_member(
+                self.user.id
+            ).roles
+        except AttributeError as e:
+            log(f"Error getting bot roles: {e}")
+            return
+
+        if not any(
+            role in message.author.roles and not role.name[0] == "@"
+            for role in _bot_roles
+        ):
+            await self.parser._send_message(
+                m("You have no permission to use this bot", message)
+            )
+            return
+
+        log(f"{message.author} executed {command!r} ({command_str!r})")
+
+        if not command:
+            await self.parser._send_message(
+                m("No command or note name specified", message)
+            )
+            return
+
+        if (cmd := get_nth_word(command)) is not None:
+            handler: Optional[Awaitable] = getattr(self.parser, f"cmd_{cmd}", None)
+
+            if handler is None:
+                await self.parser._send_message(
+                    m(
+                        f"Unknown command: {cmd!r}",
+                        message,
+                    )
+                )
+                return
+
+            await handler(message, command)  # type: ignore
+            return
+
+        formatted_command: str = pprint.pformat(command)
+
+        log(f"Invalid tokens: {formatted_command}")
+
+        _content: str = uncode(
+            f"{command_str!r}\n\n# Turned into:\n\n{formatted_command}", "```"
+        )
+
+        await self.parser._send_message(
+            m(
+                f"""Your command expression did not return any valid tokens
+```py
+{_content}
+```
+""",
+                message,
+            )
+        )
+
+
+def main() -> int:
+    """Entry/main function"""
+
+    if not os.path.exists(CONFIG_PATH):
+        log(f"Making new config: {CONFIG_PATH!r}")
+        dump_config()
+
+        log("Please configure the bot to run it")
+        return 0
+
+    print(" || Loading config... ", end="")
+    with open(CONFIG_PATH, "r") as cfg:
+        CONFIG.update(json.load(cfg))
+    print("done")
+
+    if not sqlalchemy_utils.database_exists(DB_ENGINE.url):
+        log(f"Creating database: {DB_ENGINE.url!r}")
+        DB_BASE.metadata.create_all(DB_ENGINE)
+
+    Bot().bot(os.environ.get("GI_TOKEN"))
+    dump_config()
+
+    return GLOBAL_STATE["exit"]
+
+
+if __name__ == "__main__":
+    assert main.__annotations__.get("return") is int, "main() should return an integer"
+    sys.exit(main())
