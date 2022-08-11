@@ -4,14 +4,19 @@
 
 import asyncio
 import json
+import logging
 import os
 import pprint
 import sys
+from multiprocessing import Process
+from random import randint as semi_random_int
+from traceback import format_exc as get_traceback_str
 from typing import Any, Awaitable, Dict, List, Optional
 
 import discord  # type: ignore
 import sqlalchemy  # type: ignore
 import sqlalchemy_utils  # type: ignore
+from flask import Flask
 from sqlalchemy.ext.declarative import declarative_base  # type: ignore
 
 CONFIG: Dict[str, Any] = {
@@ -443,13 +448,46 @@ def main() -> int:
         CONFIG.update(json.load(cfg))
     print("done")
 
+    # Ping server
+    log("Setting up the ping server")
+    _ping_app: Flask = Flask("")
+
+    logging.basicConfig(level=logging.CRITICAL)
+    logging.getLogger("werkzeug").disabled = True
+    _ping_app.logger.disabled = True
+
+    @_ping_app.route("/")
+    def _ping():
+        return "1"
+
+    def _ping_app_run():
+        try:
+            _port: int = semi_random_int(2000, 9000)
+            log(f"Running ping server at port {_port!r}")
+            _ping_app.run(host="0.0.0.0", port=_port)
+        except KeyboardInterrupt:
+            pass
+
+    log("Running the ping server")
+    ping_p: Process = Process(target=_ping_app_run)
+    ping_p.start()
+    # ---
+
     if not sqlalchemy_utils.database_exists(DB_ENGINE.url):
         log(f"Creating database: {DB_ENGINE.url!r}")
         DB_BASE.metadata.create_all(DB_ENGINE)
 
-    Bot().bot(os.environ.get("GI_TOKEN"))
+    try:
+        Bot().bot(os.environ.get("GI_TOKEN"))
+    except Exception:
+        print(get_traceback_str())
+    finally:
+        log("Terminating ping server")
+        ping_p.terminate()
+
     dump_config()
 
+    log(f"Exiting with code {GLOBAL_STATE['exit']!r}")
     return GLOBAL_STATE["exit"]
 
 
