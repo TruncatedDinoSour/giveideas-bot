@@ -222,7 +222,7 @@ class BotCommandsParser:
 
         notes_list: str = (
             "\n".join(
-                f"- `{uncode(''.join(ent))}`"
+                f"**-** {''.join(ent)}"
                 for ent in DB_SESSION.query(Note.name).all()
             )
             or "*No notes found*"
