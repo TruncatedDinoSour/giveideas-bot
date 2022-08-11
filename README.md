@@ -7,6 +7,7 @@
 # Running
 
 ```sh
+python3 -m pip install --user -r requirements.txt  # or preferable make a venv
 cp .env.example .env
 vim .env
 python3 src/main.py
