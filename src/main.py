@@ -116,7 +116,8 @@ class BotCommandsParser:
         self.bot = bot
 
     async def _send_message(self, message: str) -> None:
-        await self.bot.cchannel.send(message)
+        for chunk in [message[i : i + 2000] for i in range(0, len(message), 2000)]:
+            await self.bot.cchannel.send(f"{chunk}\n")
 
     def _note_exists(self, note_name: str) -> bool:
         return DB_SESSION.query(Note).filter_by(name=note_name).first() is not None
