@@ -318,6 +318,11 @@ Executed query `{uncode(sql_query)}`
         Usage: sh <command...>"""
 
         sh_command: str = command_to_str(command)
+
+        if not sh_command.strip():
+            await self._send_message(m("No command specified", message))
+            return
+
         await self._send_message(
             m(
                 f"""
@@ -325,7 +330,7 @@ Command: `{uncode(sh_command)}`
 
 Output:
 ```
-{uncode(check_command_output(sh_command).decode())}
+{uncode(check_command_output(sh_command.split(" ")).decode())}
 ```
 """,
                 message,
