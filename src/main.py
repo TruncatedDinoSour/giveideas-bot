@@ -544,7 +544,7 @@ def main() -> int:
 
     @_ping_app.route("/")
     def _ping():
-        return "1"
+        return ""
 
     def _ping_app_run():
         try:
