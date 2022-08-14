@@ -12,8 +12,8 @@ import pprint
 import sys
 from multiprocessing import Process
 from random import randint as semi_random_int
-from subprocess import check_output as check_command_output
 from subprocess import CalledProcessError
+from subprocess import check_output as check_command_output
 from time import time as time_timestamp
 from traceback import format_exc as get_traceback_str
 from typing import Any, Awaitable, Dict, List, Optional
@@ -33,6 +33,7 @@ CONFIG: Dict[str, Any] = {
     "bye-message": "Goodbye world",
     "cache-sz": 500,
     "logging": True,
+    "sh-timeout": 10,
 }
 CONFIG_PATH: str = "config.json"
 GLOBAL_STATE: Dict[str, Any] = {"exit": 0}
@@ -326,11 +327,13 @@ Executed query `{uncode(sql_query)}`
 
         output: str
         try:
-            output = check_command_output(sh_command.split(" ")).decode()
+            output = check_command_output(
+                ["timeout", str(CONFIG["sh-timeout"]), *sh_command.split(" ")]
+            ).decode()
         except FileNotFoundError:
             output = "Command not found"
         except CalledProcessError:
-            output = "Command existed with non-zero code"
+            output = "Command existed with non-zero code (or it might have timed out)"
 
         await self._send_message(
             m(
