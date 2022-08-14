@@ -3,19 +3,25 @@
 """give-ideas-bot"""
 
 import asyncio
+import datetime as dt
 import json
 import logging
 import os
+import platform
 import pprint
 import sys
 from multiprocessing import Process
 from random import randint as semi_random_int
+from subprocess import check_output as check_command_output
+from time import time as time_timestamp
 from traceback import format_exc as get_traceback_str
 from typing import Any, Awaitable, Dict, List, Optional
 
 import discord  # type: ignore
+import psutil  # type: ignore
 import sqlalchemy  # type: ignore
 import sqlalchemy_utils  # type: ignore
+from distro import name as get_distro_name
 from flask import Flask
 from sqlalchemy.ext.declarative import declarative_base  # type: ignore
 
@@ -116,7 +122,7 @@ class BotCommandsParser:
         self.bot = bot
 
     async def _send_message(self, message: str) -> None:
-        for chunk in [message[i : i + 2000] for i in range(0, len(message), 2000)]:
+        for chunk in (message[i : i + 2000] for i in range(0, len(message), 2000)):
             await self.bot.cchannel.send(f"{chunk}\n")
 
     def _note_exists(self, note_name: str) -> bool:
@@ -222,8 +228,7 @@ class BotCommandsParser:
 
         notes_list: str = (
             "\n".join(
-                f"**-** {''.join(ent)}"
-                for ent in DB_SESSION.query(Note.name).all()
+                f"**-** {''.join(ent)}" for ent in DB_SESSION.query(Note.name).all()
             )
             or "*No notes found*"
         )
@@ -302,6 +307,69 @@ Executed query `{uncode(sql_query)}`
 
         await self._send_message(
             m(f"\n```json\n{uncode(json.dumps(CONFIG, indent=4))}\n```", message)
+        )
+
+    async def cmd_sh(
+        self,
+        message: discord.Message,
+        command: List[List[str]],
+    ) -> None:
+        """Run a **blocking** shell command
+        Usage: sh <command...>"""
+
+        sh_command: str = command_to_str(command)
+        await self._send_message(
+            m(
+                f"""
+Command: `{uncode(sh_command)}`
+
+Output:
+```
+{uncode(check_command_output(sh_command).decode())}
+```
+""",
+                message,
+            )
+        )
+
+    async def cmd_botfetch(
+        self,
+        message: discord.Message,
+        command: List[List[str]],
+    ) -> None:
+        """Fetch server info
+        Usage: botfetch"""
+
+        ram = psutil.virtual_memory()
+        uname = os.uname()
+        cpu_usage: str = f"{psutil.cpu_percent()}%"
+        header: str = f"{psutil.Process().username()}@{uname.nodename}"
+        cpu_list: str = ""
+
+        for core, usage in enumerate(psutil.cpu_percent(percpu=True, interval=1), 1):
+            cpu_list += f"{' ' * 25}- Core{core}: {usage}%\n"
+
+        fetch: str = f"""
+     <----->         {header}
+    <  (0)  >        {'-' * len(header)}
+    |       |        OS: {get_distro_name()}
+   < ------- >           - Type: {sys.platform}
+   o         o           - Release: {platform.release()}
+   o  0  ()  o               - Version: {platform.version()}
+  o           o      Kernel: {uname.sysname} {uname.release}
+o o o o o o o o o        - Architecture: {uname.machine}
+o o o o o o o o o    Shell: {os.environ.get("SHELL") or '/bin/sh'}
+o o o o o o o o o    CPU: {platform.processor()} [{cpu_usage}]
+{cpu_list[:-1]}
+                     Memory: {ram.used >> 20} / {ram.total >> 20} MB ({ram.percent}%)
+                     Uptime: {dt.timedelta(seconds=time_timestamp() - psutil.boot_time())}
+"""
+
+        await self._send_message(
+            m(
+                f"```yml\n{uncode(fetch)}\n```",
+                message,
+            )
         )
 
 
