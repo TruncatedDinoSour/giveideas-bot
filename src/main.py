@@ -13,6 +13,7 @@ import sys
 from multiprocessing import Process
 from random import randint as semi_random_int
 from subprocess import check_output as check_command_output
+from subprocess import CalledProcessError
 from time import time as time_timestamp
 from traceback import format_exc as get_traceback_str
 from typing import Any, Awaitable, Dict, List, Optional
@@ -328,6 +329,8 @@ Executed query `{uncode(sql_query)}`
             output = check_command_output(sh_command.split(" ")).decode()
         except FileNotFoundError:
             output = "Command not found"
+        except CalledProcessError:
+            output = "Command existed with non-zero code"
 
         await self._send_message(
             m(
