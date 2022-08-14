@@ -323,6 +323,12 @@ Executed query `{uncode(sql_query)}`
             await self._send_message(m("No command specified", message))
             return
 
+        output: str
+        try:
+            output = check_command_output(sh_command.split(" ")).decode()
+        except FileNotFoundError:
+            output = "Command not found"
+
         await self._send_message(
             m(
                 f"""
@@ -330,7 +336,7 @@ Command: `{uncode(sh_command)}`
 
 Output:
 ```
-{uncode(check_command_output(sh_command.split(" ")).decode())}
+{uncode(output)}
 ```
 """,
                 message,
