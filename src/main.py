@@ -328,7 +328,7 @@ Executed query `{uncode(sql_query)}`
         output: str
         try:
             output = check_command_output(
-                ["timeout", str(CONFIG["sh-timeout"]), *sh_command.split(" ")]
+                ["timeout", str(CONFIG["sh-timeout"]), *sh_command.split()]
             ).decode()
         except FileNotFoundError:
             output = "Command not found"
