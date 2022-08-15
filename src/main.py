@@ -9,11 +9,10 @@ import logging
 import os
 import platform
 import pprint
+import subprocess
 import sys
 from multiprocessing import Process
 from random import randint as semi_random_int
-from subprocess import CalledProcessError
-from subprocess import check_output as check_command_output
 from time import time as time_timestamp
 from traceback import format_exc as get_traceback_str
 from typing import Any, Awaitable, Dict, List, Optional
@@ -327,13 +326,20 @@ Executed query `{uncode(sql_query)}`
 
         output: str
         try:
-            output = check_command_output(
-                ["timeout", str(CONFIG["sh-timeout"]), "sh", "-c", sh_command]
+            output = subprocess.check_output(
+                sh_command,
+                shell=True,
+                timeout=CONFIG["sh-timeout"],
+                stderr=subprocess.STDOUT,
             ).decode()
         except FileNotFoundError:
-            output = "Command not found"
-        except CalledProcessError:
-            output = "Command existed with non-zero code (or it might have timed out)"
+            output = "sh: Command not found"
+        except subprocess.CalledProcessError as err:
+            err.output = err.output or b"No output after a non-zero exit code"
+            output = f"Exit code: {err.returncode}\n\n{err.output.decode()}"
+        except subprocess.TimeoutExpired as err:
+            err.output = err.output or b"No output after a command timeout"
+            output = f"Command timedout\n\n{err.output.decode()}"
 
         await self._send_message(
             m(
