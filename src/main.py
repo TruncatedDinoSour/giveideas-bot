@@ -33,6 +33,7 @@ CONFIG: Dict[str, Any] = {
     "cache-sz": 500,
     "logging": True,
     "sh-timeout": 10,
+    "chunk-limit": 4,
 }
 CONFIG_PATH: str = "config.json"
 GLOBAL_STATE: Dict[str, Any] = {"exit": 0}
@@ -123,7 +124,16 @@ class BotCommandsParser:
         self.bot = bot
 
     async def _send_message(self, message: str) -> None:
-        for chunk in (message[i : i + 2000] for i in range(0, len(message), 2000)):
+        for chunk_idx, chunk in enumerate(
+            message[i : i + 2000] for i in range(0, len(message), 2000)
+        ):
+            if chunk_idx >= CONFIG["chunk-limit"]:
+                log("Too many chunks being sent, stopping")
+                await self.bot.cchannel.send(
+                    m("Message chunk count exceeded, message too long!", message)
+                )
+                break
+
             await self.bot.cchannel.send(f"{chunk}\n")
 
     def _note_exists(self, note_name: str) -> bool:
