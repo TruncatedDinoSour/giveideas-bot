@@ -39,6 +39,7 @@ CONFIG_PATH: str = "config.json"
 GLOBAL_STATE: Dict[str, Any] = {"exit": 0}
 CACHE: Dict[str, Any] = {
     "s2c": {},
+    "c2s": {},
 }
 
 DB_ENGINE: sqlalchemy.engine.base.Engine = sqlalchemy.create_engine("sqlite:///bot.db")
@@ -72,7 +73,18 @@ def log(message: str) -> None:
 
 
 def command_to_str(command: List[List[str]]) -> str:
-    return "".join(f"{' '.join(line)}\n" for line in command).strip()
+    _repr: str = repr(command)
+
+    if len(CACHE["c2s"]) > CONFIG["cache-sz"]:
+        CACHE["c2s"] = {}
+
+    if _repr in CACHE["c2s"]:
+        return CACHE["c2s"][_repr]
+
+    result: str = "".join(f"{' '.join(line)}\n" for line in command).strip()
+
+    CACHE["c2s"][_repr] = result
+    return result
 
 
 def str_to_command(command: str) -> List[List[str]]:
@@ -404,6 +416,21 @@ o o o o o o o o o    CPU: {platform.processor()} [{cpu_usage}]
                 message,
             )
         )
+
+    async def cmd_sayd(
+        self,
+        message: discord.Message,
+        command: List[List[str]],
+    ) -> None:
+        """Repeat a specified string and then delete the original message
+        Usage: sayd <content...>"""
+
+        if not command_to_str(command):
+            await self._send_help("sayd", message)
+            return
+
+        await message.delete()
+        await self.cmd_say(message, command)
 
 
 class Bot(discord.Client):
