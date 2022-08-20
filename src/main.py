@@ -142,9 +142,9 @@ class BotCommandsParser:
             if chunk_idx > CONFIG["chunk-limit"]:
                 log("Too many chunks being sent, stopping")
                 await self.bot.cchannel.send(
-                    m("Message chunk count exceeded, message too long!", message)
+                    f"***Message chunk count exceeded ({CONFIG['chunk-limit']}), message too long!***"
                 )
-                break
+                return
 
             await self.bot.cchannel.send(f"{chunk}\n")
 
