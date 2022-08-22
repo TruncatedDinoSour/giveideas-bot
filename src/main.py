@@ -11,6 +11,7 @@ import platform
 import pprint
 import subprocess
 import sys
+import warnings
 from multiprocessing import Process
 from random import randint as semi_random_int
 from time import time as time_timestamp
@@ -110,9 +111,16 @@ def uncode(string: str, codedel: str = "`") -> str:
 
 def async_exit(msg: Optional[str] = None, code: int = 1) -> None:
     if msg is not None:
-        log(msg)
+        log(f"\033[1m\033[31mEXIT: {msg}\033[0m")
 
-    asyncio.get_event_loop().stop()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+
+        try:
+            asyncio.get_event_loop().stop()
+        except DeprecationWarning:
+            sys.exit(code)
+
     GLOBAL_STATE["exit"] = code
 
 
@@ -452,7 +460,7 @@ class Bot(discord.Client):
         log("Beginning to do checks and run bot")
 
         if not token:
-            async_exit("Token must not be emoty, null or false")
+            async_exit("Token must not be empty, null or false")
 
         self.run(token)
 
@@ -539,7 +547,26 @@ class Bot(discord.Client):
                 )
                 return
 
-            await handler(message, command)  # type: ignore
+            try:
+                await handler(message, command)  # type: ignore
+            except Exception:
+                tb: str = get_traceback_str()
+
+                print(tb)
+
+                await self.parser._send_message(
+                    m(
+                        f"""
+Oops! Ran into an error:
+
+```py
+{tb}
+```
+""",
+                        message,
+                    )
+                )
+
             return
 
         formatted_command: str = pprint.pformat(command)
@@ -614,7 +641,7 @@ def main() -> int:
         log("Terminating ping server")
         ping_p.terminate()
 
-    dump_config()
+        dump_config()
 
     log(f"Exiting with code {GLOBAL_STATE['exit']!r}")
     return GLOBAL_STATE["exit"]
