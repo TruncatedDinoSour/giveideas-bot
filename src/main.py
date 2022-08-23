@@ -12,6 +12,7 @@ import pprint
 import subprocess
 import sys
 import warnings
+from threading import Thread
 from multiprocessing import Process
 from random import randint as semi_random_int
 from time import time as time_timestamp
@@ -476,6 +477,24 @@ o o o o o o o o o    CPU: {platform.processor()} [{cpu_usage}]
 
         await self._send_message(f"```py\n{pformat_cached(PFORMAT_CACHE)}\n```")
 
+    async def cmd_status(
+        self,
+        message: discord.Message,
+        command: List[List[str]],
+    ) -> None:
+        """Change activity status
+        Usage: status <status...>"""
+
+        if not (status := command_to_str(command)):
+            await self._send_help("status", message)
+            return
+
+        CONFIG["playing"] = status
+        Thread(target=dump_config).start()
+
+        await self.bot._change_status()
+        await self._send_message(f"Changed status to `{uncode(status)}`")
+
 
 class Bot(discord.Client):
     """The bot"""
@@ -491,6 +510,13 @@ class Bot(discord.Client):
 
         log("Making the bot")
         super().__init__(intents=intents)
+
+    async def _change_status(self) -> None:
+        log("Changing activity status")
+
+        await self.change_presence(
+            activity=discord.Game(name=CONFIG["playing"])
+        )
 
     def bot(self, token: Optional[str]) -> None:
         log("Beginning to do checks and run bot")
@@ -516,10 +542,7 @@ class Bot(discord.Client):
         log(f"Bot loaded, I am {self.user}")
         await self.parser._send_message(CONFIG["hello-message"])
 
-        log("Changing activity status")
-        await self.change_presence(
-            activity=discord.Game(name=CONFIG["playing"])
-        )
+        await self._change_status()
 
     async def on_message(self, message) -> None:
         if message.author.bot or not any(
