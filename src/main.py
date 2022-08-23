@@ -35,6 +35,7 @@ CONFIG: Dict[str, Any] = {
     "logging": True,
     "sh-timeout": 10,
     "chunk-limit": 4,
+    "playing": "",
 }
 CONFIG_PATH: str = "config.json"
 GLOBAL_STATE: Dict[str, Any] = {"exit": 0}
@@ -514,6 +515,11 @@ class Bot(discord.Client):
 
         log(f"Bot loaded, I am {self.user}")
         await self.parser._send_message(CONFIG["hello-message"])
+
+        log("Changing activity status")
+        await self.change_presence(
+            activity=discord.Game(name=CONFIG["playing"])
+        )
 
     async def on_message(self, message) -> None:
         if message.author.bot or not any(
