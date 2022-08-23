@@ -4,8 +4,7 @@
 
 import asyncio
 import datetime as dt
-# import ujson  # type: ignore
-import json as ujson  # For now
+import json
 import logging
 import os
 import platform
@@ -66,7 +65,7 @@ def dump_config() -> None:
     log("Dumping config")
 
     with open(CONFIG_PATH, "w") as cfg:
-        ujson.dump(CONFIG, cfg, indent=4)
+        json.dump(CONFIG, cfg, indent=4)
 
 
 def log(message: str) -> None:
@@ -108,11 +107,11 @@ def str_to_command(command: str) -> List[List[str]]:
     if len(CACHE["s2c"]) > CONFIG["cache-sz"]:
         CACHE["s2c"].clear()
     elif command in CACHE["s2c"]:
-        return ujson.loads(CACHE["s2c"][command])
+        return json.loads(CACHE["s2c"][command])
 
     result: List[List[str]] = [line.split(" ") for line in command.strip().split("\n")]
 
-    CACHE["s2c"][command] = ujson.dumps(result)
+    CACHE["s2c"][command] = json.dumps(result)
 
     return result
 
@@ -353,7 +352,7 @@ Executed query `{uncode(sql_query)}`
         Usage: config"""
 
         await self._send_message(
-            m(f"\n```json\n{uncode(ujson.dumps(CONFIG, indent=4))}\n```", message)
+            m(f"\n```json\n{uncode(json.dumps(CONFIG, indent=4))}\n```", message)
         )
 
     async def cmd_sh(
@@ -637,7 +636,7 @@ def main() -> int:
 
     print(" || Loading config... ", end="")
     with open(CONFIG_PATH, "r") as cfg:
-        CONFIG.update(ujson.load(cfg))
+        CONFIG.update(json.load(cfg))
     print("done")
 
     # Ping server

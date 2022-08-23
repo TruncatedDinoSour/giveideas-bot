@@ -4,4 +4,3 @@ sqlalchemy-utils
 flask
 psutil
 distro
-ujson
