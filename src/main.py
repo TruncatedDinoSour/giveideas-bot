@@ -4,7 +4,6 @@
 
 import asyncio
 import datetime as dt
-import json
 import logging
 import os
 import platform
@@ -22,6 +21,7 @@ import discord  # type: ignore
 import psutil  # type: ignore
 import sqlalchemy  # type: ignore
 import sqlalchemy_utils  # type: ignore
+import ujson  # type: ignore
 from distro import name as get_distro_name
 from flask import Flask
 from sqlalchemy.ext.declarative import declarative_base  # type: ignore
@@ -38,10 +38,12 @@ CONFIG: Dict[str, Any] = {
 }
 CONFIG_PATH: str = "config.json"
 GLOBAL_STATE: Dict[str, Any] = {"exit": 0}
+
 CACHE: Dict[str, Any] = {
     "s2c": {},
     "c2s": {},
 }
+PFORMAT_CACHE: Dict[str, str] = {}
 
 DB_ENGINE: sqlalchemy.engine.base.Engine = sqlalchemy.create_engine("sqlite:///bot.db")
 DB_BASE: sqlalchemy.orm.decl_api.DeclarativeMeta = declarative_base()
@@ -63,7 +65,7 @@ def dump_config() -> None:
     log("Dumping config")
 
     with open(CONFIG_PATH, "w") as cfg:
-        json.dump(CONFIG, cfg, indent=4)
+        ujson.dump(CONFIG, cfg, indent=4)
 
 
 def log(message: str) -> None:
@@ -73,13 +75,26 @@ def log(message: str) -> None:
     print(f" :: {message}")
 
 
+def pformat_cached(string: Any) -> str:
+    _string: str = f"{type(string)}.{string}"
+
+    if len(PFORMAT_CACHE) > CONFIG["cache-sz"]:
+        PFORMAT_CACHE.clear()
+    elif _string in PFORMAT_CACHE:
+        return PFORMAT_CACHE[_string]
+
+    result: str = pprint.pformat(string)
+
+    PFORMAT_CACHE[_string] = result
+    return result
+
+
 def command_to_str(command: List[List[str]]) -> str:
     _repr: str = repr(command)
 
     if len(CACHE["c2s"]) > CONFIG["cache-sz"]:
-        CACHE["c2s"] = {}
-
-    if _repr in CACHE["c2s"]:
+        CACHE["c2s"].clear()
+    elif _repr in CACHE["c2s"]:
         return CACHE["c2s"][_repr]
 
     result: str = "".join(f"{' '.join(line)}\n" for line in command).strip()
@@ -90,14 +105,14 @@ def command_to_str(command: List[List[str]]) -> str:
 
 def str_to_command(command: str) -> List[List[str]]:
     if len(CACHE["s2c"]) > CONFIG["cache-sz"]:
-        CACHE["s2c"] = {}
-
-    if command in CACHE["s2c"]:
-        return CACHE["s2c"][command]
+        CACHE["s2c"].clear()
+    elif command in CACHE["s2c"]:
+        return ujson.loads(CACHE["s2c"][command])
 
     result: List[List[str]] = [line.split(" ") for line in command.strip().split("\n")]
 
-    CACHE["s2c"] = result
+    CACHE["s2c"][command] = ujson.dumps(result)
+
     return result
 
 
@@ -113,15 +128,15 @@ def async_exit(msg: Optional[str] = None, code: int = 1) -> None:
     if msg is not None:
         log(f"\033[1m\033[31mEXIT: {msg}\033[0m")
 
+    GLOBAL_STATE["exit"] = code
+
     with warnings.catch_warnings():
         warnings.simplefilter("error")
 
         try:
             asyncio.get_event_loop().stop()
         except DeprecationWarning:
-            sys.exit(code)
-
-    GLOBAL_STATE["exit"] = code
+            sys.exit()
 
 
 def get_nth_word(command: List[List[str]], n: int = 0) -> Optional[str]:
@@ -319,7 +334,7 @@ Executed query `{uncode(sql_query)}`
 ```py
 # Query results
 
-{pprint.pformat(DB_SESSION.execute(f'{sql_query}').all())}
+{pformat_cached(DB_SESSION.execute(f'{sql_query}').all())}
 ```
 """
             DB_SESSION.commit()
@@ -337,7 +352,7 @@ Executed query `{uncode(sql_query)}`
         Usage: config"""
 
         await self._send_message(
-            m(f"\n```json\n{uncode(json.dumps(CONFIG, indent=4))}\n```", message)
+            m(f"\n```json\n{uncode(ujson.dumps(CONFIG, indent=4))}\n```", message)
         )
 
     async def cmd_sh(
@@ -433,12 +448,32 @@ o o o o o o o o o    CPU: {platform.processor()} [{cpu_usage}]
         """Repeat a specified string and then delete the original message
         Usage: sayd <content...>"""
 
-        if not command_to_str(command):
+        if not (say := command_to_str(command)):
             await self._send_help("sayd", message)
             return
 
         await message.delete()
-        await self.cmd_say(message, command)
+        await self._send_message(say)
+
+    async def cmd_dumpcache(
+        self,
+        message: discord.Message,
+        command: List[List[str]],
+    ) -> None:
+        """Dump in-memory message cache
+        Usage: dumpcache"""
+
+        await self._send_message(f"```py\n{pformat_cached(CACHE)}\n```")
+
+    async def cmd_dumpcachep(
+        self,
+        message: discord.Message,
+        command: List[List[str]],
+    ) -> None:
+        """Dump in-memory pformat cache
+        Usage: dumpcachep"""
+
+        await self._send_message(f"```py\n{pformat_cached(PFORMAT_CACHE)}\n```")
 
 
 class Bot(discord.Client):
@@ -569,7 +604,7 @@ Oops! Ran into an error:
 
             return
 
-        formatted_command: str = pprint.pformat(command)
+        formatted_command: str = pformat_cached(command)
 
         log(f"Invalid tokens: {formatted_command}")
 
@@ -601,7 +636,7 @@ def main() -> int:
 
     print(" || Loading config... ", end="")
     with open(CONFIG_PATH, "r") as cfg:
-        CONFIG.update(json.load(cfg))
+        CONFIG.update(ujson.load(cfg))
     print("done")
 
     # Ping server
@@ -643,8 +678,8 @@ def main() -> int:
 
         dump_config()
 
-    log(f"Exiting with code {GLOBAL_STATE['exit']!r}")
-    return GLOBAL_STATE["exit"]
+        log(f"Exiting with code {GLOBAL_STATE['exit']!r}")
+        return GLOBAL_STATE["exit"]
 
 
 if __name__ == "__main__":
