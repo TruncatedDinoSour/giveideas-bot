@@ -4,6 +4,8 @@
 
 import asyncio
 import datetime as dt
+# import ujson  # type: ignore
+import json as ujson  # For now
 import logging
 import os
 import platform
@@ -21,7 +23,6 @@ import discord  # type: ignore
 import psutil  # type: ignore
 import sqlalchemy  # type: ignore
 import sqlalchemy_utils  # type: ignore
-import ujson  # type: ignore
 from distro import name as get_distro_name
 from flask import Flask
 from sqlalchemy.ext.declarative import declarative_base  # type: ignore
