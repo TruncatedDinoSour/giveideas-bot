@@ -495,6 +495,34 @@ o o o o o o o o o    CPU: {platform.processor()} [{cpu_usage}]
         await self.bot._change_status()
         await self._send_message(f"Changed status to `{uncode(status)}`")
 
+    async def cmd_warm(
+        self,
+        message: discord.Message,
+        command: List[List[str]],
+    ) -> None:
+        """Warm a user
+        Usage: warm <user>"""
+
+        if not (warm := command_to_str(command)):
+            await self._send_help("warm", message)
+            return
+
+        await self._send_message(f":tea::coffee::heart_on_fire: {warm} :heart_on_fire::coffee::tea:")
+
+    async def cmd_banana(
+        self,
+        message: discord.Message,
+        command: List[List[str]],
+    ) -> None:
+        """Banana a user
+        Usage: banana <user>"""
+
+        if not (banana := command_to_str(command)):
+            await self._send_help("banana", message)
+            return
+
+        await self._send_message(f":banana: {banana} :banana:")
+
 
 class Bot(discord.Client):
     """The bot"""

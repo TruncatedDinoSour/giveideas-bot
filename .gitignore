@@ -163,3 +163,4 @@ cython_debug/
 .env
 bot.db
 config.json
+.config
